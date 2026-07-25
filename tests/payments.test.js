@@ -1,0 +1,260 @@
+require('./setup');
+const crypto = require('crypto');
+const request = require('supertest');
+const createApp = require('../src/app');
+const { pool } = require('../src/config/db');
+
+process.env.PAYSTACK_SECRET_KEY = 'sk_test_abc123';
+
+const app = createApp();
+
+function signBody(bodyString) {
+  return crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(bodyString).digest('hex');
+}
+
+function mockConnection(queryResponses) {
+  return {
+    beginTransaction: jest.fn(),
+    query: jest.fn().mockImplementation(() => Promise.resolve(queryResponses.shift())),
+    commit: jest.fn(),
+    rollback: jest.fn(),
+    release: jest.fn(),
+  };
+}
+
+describe('POST /api/payments/initialize', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    global.fetch = originalFetch;
+  });
+
+  it('initializes a Paystack transaction for a valid order', async () => {
+    pool.query.mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]]); // getOrderById
+    pool.query.mockResolvedValueOnce([{}]); // createPayment insert
+
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: true,
+        data: {
+          authorization_url: 'https://checkout.paystack.com/abc123',
+          access_code: 'abc123',
+          reference: 'foodflow_1_abc123',
+        },
+      }),
+    });
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.authorizationUrl).toBe('https://checkout.paystack.com/abc123');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/transaction/initialize'),
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('rejects an unknown order with a 404', async () => {
+    pool.query.mockResolvedValueOnce([[undefined]]);
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 999, email: 'customer@example.com' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects a missing email with a 400', async () => {
+    const res = await request(app).post('/api/payments/initialize').send({ orderId: 1 });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/payments/webhook', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('accepts a validly signed charge.success event and updates the order', async () => {
+    const payload = {
+      event: 'charge.success',
+      data: { id: 555, reference: 'foodflow_1_abc123' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    pool.getConnection.mockResolvedValueOnce(
+      mockConnection([
+        [[undefined]], // SELECT processed_webhook_events -> not found
+        [{}], // INSERT processed_webhook_events
+        [[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+        [{}], // UPDATE payments
+        [{}], // UPDATE orders
+      ])
+    );
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body.received).toBe(true);
+  });
+
+  it('rejects a tampered payload with a 401', async () => {
+    const payload = { event: 'charge.success', data: { id: 556, reference: 'foodflow_1_abc123' } };
+    const rawBody = JSON.stringify(payload);
+    const validSignature = signBody(rawBody);
+
+    const tamperedBody = JSON.stringify({ ...payload, data: { ...payload.data, reference: 'hijacked' } });
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', validSignature)
+      .set('Content-Type', 'application/json')
+      .send(tamperedBody);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a request with no signature header at all', async () => {
+    const payload = { event: 'charge.success', data: { id: 557, reference: 'foodflow_1_abc123' } };
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify(payload));
+
+    expect(res.status).toBe(401);
+  });
+
+  it('processes the same event_id only once (idempotency)', async () => {
+    const payload = { event: 'charge.success', data: { id: 558, reference: 'foodflow_1_abc123' } };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    // First delivery: event not yet seen, gets processed fully.
+    pool.getConnection.mockResolvedValueOnce(
+      mockConnection([
+        [[undefined]],
+        [{}],
+        [[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_abc123' }]],
+        [{}],
+        [{}],
+      ])
+    );
+
+    const firstRes = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+    expect(firstRes.status).toBe(200);
+
+    // Second delivery of the exact same event (Paystack retry): event_id
+    // already exists, so this must short-circuit to a no-op.
+    const secondConnection = mockConnection([[[{ id: 1 }]]]); // SELECT finds an existing row
+    pool.getConnection.mockResolvedValueOnce(secondConnection);
+
+    const secondRes = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(secondRes.status).toBe(200);
+    expect(secondConnection.rollback).toHaveBeenCalled();
+    // Only the existence check ran - no insert/update queries followed it.
+    expect(secondConnection.query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('processPaymentWebhookEvent under real concurrency', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('resolves both calls cleanly when two deliveries of the same event race each other', async () => {
+    const { processPaymentWebhookEvent } = require('../src/models/paymentModel');
+
+    // Connection A "wins" the race: its SELECT sees no existing event, and
+    // its INSERT succeeds, so it proceeds to do the real payment/order updates.
+    const connectionA = {
+      beginTransaction: jest.fn(),
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([[undefined]]) // SELECT processed_webhook_events -> not found
+        .mockResolvedValueOnce([{}]) // INSERT succeeds
+        .mockResolvedValueOnce([[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_race' }]]) // SELECT payment
+        .mockResolvedValueOnce([{}]) // UPDATE payments
+        .mockResolvedValueOnce([{}]), // UPDATE orders
+      commit: jest.fn(),
+      rollback: jest.fn(),
+      release: jest.fn(),
+    };
+
+    // Connection B "loses" the race: its SELECT also sees no existing event
+    // (this is the actual race - both checks happen before either commits),
+    // but by the time its INSERT runs, A's has already committed, so MySQL's
+    // UNIQUE constraint on event_id rejects it with ER_DUP_ENTRY.
+    const dupError = Object.assign(new Error("Duplicate entry 'evt_race' for key 'event_id'"), {
+      code: 'ER_DUP_ENTRY',
+    });
+    const connectionB = {
+      beginTransaction: jest.fn(),
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([[undefined]]) // SELECT -> also not found (the race)
+        .mockRejectedValueOnce(dupError), // INSERT loses the race
+      commit: jest.fn(),
+      rollback: jest.fn(),
+      release: jest.fn(),
+    };
+
+    pool.getConnection.mockResolvedValueOnce(connectionA).mockResolvedValueOnce(connectionB);
+
+    const eventPayload = {
+      eventId: 'evt_race',
+      eventType: 'charge.success',
+      reference: 'foodflow_1_race',
+      succeeded: true,
+    };
+
+    // Fire both concurrently, the way two near-simultaneous Paystack retries would arrive.
+    const [resultA, resultB] = await Promise.all([
+      processPaymentWebhookEvent(eventPayload),
+      processPaymentWebhookEvent(eventPayload),
+    ]);
+
+    // Neither call should throw. Exactly one processed it for real, the
+    // other must resolve as alreadyProcessed instead of erroring.
+    expect([resultA.alreadyProcessed, resultB.alreadyProcessed].sort()).toEqual([false, true]);
+    expect(connectionB.rollback).toHaveBeenCalled();
+    expect(connectionA.commit).toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/payments/:orderId/status', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('returns the payment status for an order', async () => {
+    pool.query.mockResolvedValueOnce([
+      [{ order_id: 1, paystack_reference: 'foodflow_1_abc123', status: 'success', amount_naira: '3500.00' }],
+    ]);
+
+    const res = await request(app).get('/api/payments/1/status');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('success');
+  });
+
+  it('returns a 404 when there is no payment for the order', async () => {
+    pool.query.mockResolvedValueOnce([[undefined]]);
+
+    const res = await request(app).get('/api/payments/999/status');
+
+    expect(res.status).toBe(404);
+  });
+});
