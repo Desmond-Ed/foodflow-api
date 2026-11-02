@@ -1,0 +1,15 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+# Node
+node_modules/
+*.log
+npm-debug.log*
+# Test / coverage
+coverage/
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

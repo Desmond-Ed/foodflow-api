@@ -90,7 +90,17 @@ async function updateOrderStatus(orderId, newStatus) {
     );
   }
 
-  await pool.query('UPDATE orders SET status = ? WHERE id = ?', [newStatus, orderId]);
+  const [result] = await pool.query(
+    'UPDATE orders SET status = ? WHERE id = ? AND status = ?',
+    [newStatus, orderId, order.status]
+  );
+  if (result.affectedRows === 0) {
+    throw Object.assign(
+      new Error('Order status was changed concurrently; please retry'),
+      { statusCode: 409 }
+    );
+  }
+
   return { ...order, status: newStatus };
 }
 

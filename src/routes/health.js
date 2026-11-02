@@ -15,18 +15,30 @@ router.get('/', async (req, res) => {
     dependencies: { mysql: 'unknown', redis: 'unknown' },
   };
 
+  let mysqlUp = true;
   try {
     await checkDbConnection();
     health.dependencies.mysql = 'up';
   } catch (err) {
+    mysqlUp = false;
     health.dependencies.mysql = 'down';
-    health.status = 'degraded';
   }
 
   health.dependencies.redis = redisClient.isOpen ? 'up' : 'down';
-  if (!redisClient.isOpen) health.status = 'degraded';
 
-  res.status(health.status === 'ok' ? 200 : 503).json(health);
+  // MySQL is a hard dependency: without it the service is unavailable.
+  // Redis is optional, so a missing cache only degrades the service.
+  if (!mysqlUp) {
+    health.status = 'degraded';
+    res.status(503).json(health);
+    return;
+  }
+
+  if (health.dependencies.redis === 'down') {
+    health.status = 'degraded';
+  }
+
+  res.status(200).json(health);
 });
 
 module.exports = router;

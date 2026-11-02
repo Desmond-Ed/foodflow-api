@@ -4,13 +4,40 @@ const { ApiError } = require('../middleware/errorHandler');
 
 const router = express.Router();
 
+function requirePositiveInteger(value, field) {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new ApiError(400, `${field} is required and must be a positive integer`);
+  }
+  return value;
+}
+
+function parseOrderId(rawId) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new ApiError(400, 'Order id must be a positive integer');
+  }
+  return id;
+}
+
 // POST /api/orders
 router.post('/', async (req, res, next) => {
   try {
-    const { customerId, vendorId, items } = req.body;
+    const { customerId, vendorId, items } = req.body || {};
 
-    if (!customerId || !vendorId || !Array.isArray(items) || items.length === 0) {
-      throw new ApiError(400, 'customerId, vendorId and a non-empty items array are required');
+    requirePositiveInteger(customerId, 'customerId');
+    requirePositiveInteger(vendorId, 'vendorId');
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new ApiError(400, 'items is required and must be a non-empty array');
+    }
+
+    for (const item of items) {
+      if (!item || !Number.isInteger(item.menuItemId) || item.menuItemId < 1) {
+        throw new ApiError(400, 'Each item must have a menuItemId that is a positive integer');
+      }
+      if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+        throw new ApiError(400, 'Each item must have a quantity that is a positive integer');
+      }
     }
 
     const result = await createOrder({ customerId, vendorId, items });
@@ -23,7 +50,8 @@ router.post('/', async (req, res, next) => {
 // GET /api/orders/:id
 router.get('/:id', async (req, res, next) => {
   try {
-    const order = await getOrderById(Number(req.params.id));
+    const orderId = parseOrderId(req.params.id);
+    const order = await getOrderById(orderId);
     if (!order) {
       throw new ApiError(404, 'Order not found');
     }
@@ -36,11 +64,12 @@ router.get('/:id', async (req, res, next) => {
 // PATCH /api/orders/:id/status
 router.patch('/:id/status', async (req, res, next) => {
   try {
+    const orderId = parseOrderId(req.params.id);
     const { status } = req.body;
     if (!status) {
       throw new ApiError(400, 'status is required');
     }
-    const updated = await updateOrderStatus(Number(req.params.id), status);
+    const updated = await updateOrderStatus(orderId, status);
     res.json({ data: updated });
   } catch (err) {
     next(err);

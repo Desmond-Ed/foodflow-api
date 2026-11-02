@@ -30,10 +30,7 @@ describe('POST /api/payments/initialize', () => {
     global.fetch = originalFetch;
   });
 
-  it('initializes a Paystack transaction for a valid order', async () => {
-    pool.query.mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]]); // getOrderById
-    pool.query.mockResolvedValueOnce([{}]); // createPayment insert
-
+  function mockPaystackSuccess() {
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -45,6 +42,15 @@ describe('POST /api/payments/initialize', () => {
         },
       }),
     });
+  }
+
+  it('initializes a Paystack transaction for a valid order', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]]) // getOrderById
+      .mockResolvedValueOnce([[undefined]]) // getPaymentByOrderId -> no prior payment
+      .mockResolvedValueOnce([{}]); // createPayment insert
+
+    mockPaystackSuccess();
 
     const res = await request(app)
       .post('/api/payments/initialize')
@@ -68,9 +74,98 @@ describe('POST /api/payments/initialize', () => {
     expect(res.status).toBe(404);
   });
 
+  it.each(['abc', 0, 1.5])('rejects orderId %p with a 400', async (orderId) => {
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId, email: 'customer@example.com' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toBe('orderId must be a positive integer');
+  });
+
   it('rejects a missing email with a 400', async () => {
     const res = await request(app).post('/api/payments/initialize').send({ orderId: 1 });
     expect(res.status).toBe(400);
+  });
+
+  it('rejects a request with no body instead of throwing a 500', async () => {
+    global.fetch = jest.fn();
+
+    const res = await request(app).post('/api/payments/initialize');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toBe('orderId must be a positive integer');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['not-an-email', 'missing-at.example.com', 'a@b'])(
+    'rejects malformed email %p with a 400',
+    async (email) => {
+      const res = await request(app)
+        .post('/api/payments/initialize')
+        .send({ orderId: 1, email });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toBe('a valid email is required');
+    }
+  );
+
+  it('rejects an order that is not pending with a 409 before calling Paystack', async () => {
+    pool.query.mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'accepted' }]]);
+    global.fetch = jest.fn();
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe('Order is not awaiting payment');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects when a payment is already pending without calling Paystack', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
+      .mockResolvedValueOnce([[{ id: 5, status: 'pending' }]]);
+    global.fetch = jest.fn();
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe('A payment is already pending for this order');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the order has already been paid', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
+      .mockResolvedValueOnce([[{ id: 5, status: 'success' }]]);
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe('Order has already been paid');
+  });
+
+  it('allows a retry when the latest payment failed', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
+      .mockResolvedValueOnce([[{ id: 5, status: 'failed' }]])
+      .mockResolvedValueOnce([{}]); // createPayment insert
+
+    mockPaystackSuccess();
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(201);
+    expect(pool.query).toHaveBeenCalledTimes(3);
+    expect(pool.query.mock.calls[2][0]).toMatch(/INSERT INTO payments/);
   });
 });
 

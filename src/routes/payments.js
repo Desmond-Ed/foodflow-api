@@ -12,19 +12,39 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // POST /api/payments/initialize
 // Body: { orderId, email } -> Paystack checkout URL
 router.post('/initialize', async (req, res, next) => {
   try {
-    const { orderId, email } = req.body;
+    const { orderId, email } = req.body || {};
 
-    if (!orderId || !email) {
-      throw new ApiError(400, 'orderId and email are required');
+    if (!Number.isInteger(orderId) || orderId < 1) {
+      throw new ApiError(400, 'orderId must be a positive integer');
     }
 
-    const order = await getOrderById(Number(orderId));
+    if (typeof email !== 'string' || !EMAIL_PATTERN.test(email)) {
+      throw new ApiError(400, 'a valid email is required');
+    }
+
+    const order = await getOrderById(orderId);
     if (!order) {
       throw new ApiError(404, 'Order not found');
+    }
+
+    if (order.status !== 'pending') {
+      throw new ApiError(409, 'Order is not awaiting payment');
+    }
+
+    const existingPayment = await getPaymentByOrderId(orderId);
+    if (existingPayment) {
+      if (existingPayment.status === 'pending') {
+        throw new ApiError(409, 'A payment is already pending for this order');
+      }
+      if (existingPayment.status === 'success') {
+        throw new ApiError(409, 'Order has already been paid');
+      }
     }
 
     const reference = `foodflow_${order.id}_${crypto.randomBytes(6).toString('hex')}`;
