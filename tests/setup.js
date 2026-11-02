@@ -12,6 +12,7 @@ jest.mock('../src/config/db', () => ({
 jest.mock('../src/config/redis', () => ({
   redisClient: {
     isOpen: false,
+    isReady: false,
     get: jest.fn(),
     setEx: jest.fn(),
     del: jest.fn(),

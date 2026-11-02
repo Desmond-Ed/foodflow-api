@@ -119,6 +119,20 @@ describe('resolveAddress', () => {
     expect(result.latitude).toBeCloseTo(6.6018);
   });
 
+  it('falls back to the landmark table when Nominatim times out', async () => {
+    redisClient.isOpen = false;
+    pool.query.mockResolvedValueOnce([[]]).mockResolvedValueOnce([{}]);
+    const timeoutError = new Error('The operation was aborted due to timeout');
+    timeoutError.name = 'TimeoutError';
+    global.fetch = jest.fn().mockRejectedValueOnce(timeoutError);
+
+    const result = await resolveAddress('Opposite Ikeja City Mall, no house number');
+
+    expect(result.source).toBe('landmark');
+    expect(result.confidence).toBe('medium');
+    expect(global.fetch.mock.calls[0][1].signal).toBeDefined();
+  });
+
   it('throws a 422 when nothing matches and Nominatim has nothing', async () => {
     redisClient.isOpen = false;
     pool.query.mockResolvedValueOnce([[]]);

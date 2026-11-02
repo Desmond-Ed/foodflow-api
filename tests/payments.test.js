@@ -167,6 +167,23 @@ describe('POST /api/payments/initialize', () => {
     expect(pool.query).toHaveBeenCalledTimes(3);
     expect(pool.query.mock.calls[2][0]).toMatch(/INSERT INTO payments/);
   });
+
+  it('returns 502 when the Paystack request fails or times out', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
+      .mockResolvedValueOnce([[undefined]]); // no prior payment
+
+    const abortError = new Error('The operation was aborted due to timeout');
+    abortError.name = 'AbortError';
+    global.fetch = jest.fn().mockRejectedValueOnce(abortError);
+
+    const res = await request(app)
+      .post('/api/payments/initialize')
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error.message).toBe('Failed to initialize payment with Paystack');
+  });
 });
 
 describe('POST /api/payments/webhook', () => {

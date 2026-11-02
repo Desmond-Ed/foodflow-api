@@ -122,6 +122,7 @@ async function saveToCache(rawAddress, resolved) {
 async function queryNominatim(normalizedAddress) {
   return enqueueNominatimCall(async () => {
     const url = `${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(normalizedAddress)}`;
+    const timeoutMs = Number(process.env.NOMINATIM_TIMEOUT_MS) || 5000;
 
     const response = await fetch(url, {
       headers: {
@@ -130,6 +131,7 @@ async function queryNominatim(normalizedAddress) {
         // blocked outright.
         'User-Agent': process.env.NOMINATIM_USER_AGENT || 'foodflow-api (contact@example.com)',
       },
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {

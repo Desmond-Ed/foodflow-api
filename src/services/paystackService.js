@@ -13,19 +13,28 @@ async function initializeTransaction({ email, amountNaira, reference, metadata }
     throw new ApiError(500, 'Paystack secret key is not configured');
   }
 
-  const response = await fetch(`${PAYSTACK_BASE_URL}/transaction/initialize`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      email,
-      amount: Math.round(amountNaira * 100),
-      reference,
-      metadata,
-    }),
-  });
+  const timeoutMs = Number(process.env.PAYSTACK_TIMEOUT_MS) || 10000;
+
+  let response;
+  try {
+    response = await fetch(`${PAYSTACK_BASE_URL}/transaction/initialize`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        amount: Math.round(amountNaira * 100),
+        reference,
+        metadata,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    logger.error(`paystack initialize request failed: ${err.message}`);
+    throw new ApiError(502, 'Failed to initialize payment with Paystack');
+  }
 
   const body = await response.json();
 
