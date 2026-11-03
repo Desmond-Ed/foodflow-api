@@ -1,5 +1,7 @@
 # FoodFlow API
 
+[![CI](https://github.com/Desmond-Ed/foodflow-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Desmond-Ed/foodflow-api/actions/workflows/ci.yml)
+
 A backend service for a simplified food-delivery platform: vendors list menus,
 customers place orders, riders get assigned, and orders move through a
 defined status lifecycle. Built to mirror the kind of order-management system
@@ -179,21 +181,55 @@ curl -X PATCH http://localhost:3000/api/orders/1/status \
   -d '{ "status": "accepted" }'
 ```
 
+## Configuration
+
+Copy `.env.example` to `.env` and fill in the placeholders. No real secrets belong in the repository.
+
+| Variable | Example placeholder | Purpose |
+|----------|---------------------|---------|
+| `PORT` | `3000` | Port the API listens on. |
+| `DB_HOST` | `localhost` | MySQL host. |
+| `DB_PORT` | `3306` | MySQL port. |
+| `DB_USER` | `<db-user>` | MySQL user. |
+| `DB_PASSWORD` | `<db-password>` | MySQL password. |
+| `DB_NAME` | `foodflow` | MySQL database name. |
+| `REDIS_URL` | `redis://<host>:<port>` | Redis connection URL. |
+| `REDIS_CONNECT_TIMEOUT_MS` | `2000` | Redis connection timeout in milliseconds. |
+| `TRUST_PROXY` | `false` | Trusted proxy hop count; set to `1` behind a single reverse proxy (e.g. Render). |
+| `RATE_LIMIT_MAX` | `100` | Maximum general API requests per minute per IP. |
+| `WEBHOOK_RATE_LIMIT_MAX` | `1000` | Maximum Paystack webhook requests per minute per IP. |
+| `LOG_LEVEL` | `info` | Winston log level. |
+| `NOMINATIM_USER_AGENT` | `<app-name> (<contact-email>)` | Required Nominatim User-Agent identifying the app and a contact. |
+| `NOMINATIM_MIN_INTERVAL_MS` | `1000` | Minimum interval between Nominatim calls in milliseconds (rate limiting). |
+| `NOMINATIM_TIMEOUT_MS` | `5000` | Outbound Nominatim request timeout in milliseconds. |
+| `PAYSTACK_SECRET_KEY` | `sk_test_<placeholder>` | Paystack secret key (test mode). |
+| `PAYSTACK_PUBLIC_KEY` | `pk_test_<placeholder>` | Paystack public key (test mode). |
+| `PAYSTACK_TIMEOUT_MS` | `10000` | Outbound Paystack initialize request timeout in milliseconds. |
+
+`TRUST_PROXY` must be set to `1` behind a single reverse proxy such as Render; leave it `false` when the API is directly exposed. `RATE_LIMIT_MAX` caps general API traffic and `WEBHOOK_RATE_LIMIT_MAX` caps webhook traffic separately so Paystack retries are not blocked by the general limit. `NOMINATIM_TIMEOUT_MS` bounds outbound geocoding calls and `PAYSTACK_TIMEOUT_MS` bounds outbound payment initialization calls.
+
+### Health checks
+
+`GET /api/health` returns HTTP `200` while MySQL is up. If Redis is also up the response status is `"ok"`; if Redis is down it is `"degraded"` but the endpoint still returns `200`. When MySQL is down the endpoint returns HTTP `503` with status `"degraded"`.
+
 ## Running locally
 
 ```bash
 # 1. Start MySQL + Redis
 docker compose up -d
 
-# 2. Install dependencies
+# 2. Use Node 22 (pinned in .nvmrc)
+nvm use
+
+# 3. Install dependencies
 npm install
 
-# 3. Set up environment variables
+# 4. Set up environment variables
 cp .env.example .env
 # Fill in NOMINATIM_USER_AGENT and PAYSTACK_SECRET_KEY/PAYSTACK_PUBLIC_KEY
 # (a free Paystack test-mode account provides sandbox keys)
 
-# 4. Run the API
+# 5. Run the API
 npm run dev
 ```
 
@@ -237,7 +273,6 @@ that swap only touches one file.
 - Pagination on `GET /api/vendors` and order history endpoints
 - Rider assignment logic (currently a rider can be linked to an order but nothing auto-assigns one)
 - Idempotency keys on `POST /api/orders` to safely handle client retries
-- CI pipeline (GitHub Actions) running `npm test` on every push
 - A larger, more systematic landmark table for address fallback (currently a
   small hand-seeded set of well-known Ikeja/Lagos locations)
 - Refund handling and a `charge.failed`/dispute path in the Paystack webhook,
