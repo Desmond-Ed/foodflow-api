@@ -31,12 +31,19 @@ router.post('/', async (req, res, next) => {
       throw new ApiError(400, 'items is required and must be a non-empty array');
     }
 
+    if (items.length > 50) {
+      throw new ApiError(400, 'An order can contain at most 50 items');
+    }
+
     for (const item of items) {
       if (!item || !Number.isInteger(item.menuItemId) || item.menuItemId < 1) {
         throw new ApiError(400, 'Each item must have a menuItemId that is a positive integer');
       }
       if (!Number.isInteger(item.quantity) || item.quantity < 1) {
         throw new ApiError(400, 'Each item must have a quantity that is a positive integer');
+      }
+      if (item.quantity > 20) {
+        throw new ApiError(400, 'Each item quantity cannot exceed 20');
       }
     }
 

@@ -5,10 +5,20 @@ const { redisClient } = require('../config/redis');
 const router = express.Router();
 
 // GET /api/health
-// A lightweight endpoint an uptime monitor (or load balancer) can poll
-// to confirm the API and its dependencies are actually reachable, not
-// just that the Node process is running.
-router.get('/', async (req, res) => {
+// Liveness only: confirms the process is running without calling any
+// dependency, so a slow database or cache can never make the process look
+// dead to an orchestrator.
+router.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptimeSeconds: process.uptime(),
+  });
+});
+
+// GET /api/ready
+// Readiness: MySQL is a hard dependency, so it must be reachable for the
+// instance to receive traffic. Redis is optional and only degrades service.
+router.get('/ready', async (req, res) => {
   const health = {
     status: 'ok',
     uptimeSeconds: process.uptime(),
@@ -28,8 +38,6 @@ router.get('/', async (req, res) => {
     typeof redisClient.isReady === 'boolean' ? redisClient.isReady : redisClient.isOpen;
   health.dependencies.redis = redisReady ? 'up' : 'down';
 
-  // MySQL is a hard dependency: without it the service is unavailable.
-  // Redis is optional, so a missing cache only degrades the service.
   if (!mysqlUp) {
     health.status = 'degraded';
     res.status(503).json(health);

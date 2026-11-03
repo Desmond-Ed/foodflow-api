@@ -34,7 +34,7 @@ describe('POST /api/addresses/resolve', () => {
     });
 
     const res = await request(app)
-      .post('/api/addresses/resolve')
+      .post('/api/addresses/resolve').set('x-api-key', process.env.API_KEY)
       .send({ rawAddress: 'Some New Unseen Street, Lagos' });
 
     expect(res.status).toBe(200);
@@ -49,7 +49,7 @@ describe('POST /api/addresses/resolve', () => {
     ['empty', { rawAddress: '' }],
     ['non-string', { rawAddress: 123 }],
   ])('rejects a %s rawAddress with a 400', async (label, body) => {
-    const res = await request(app).post('/api/addresses/resolve').send(body);
+    const res = await request(app).post('/api/addresses/resolve').set('x-api-key', process.env.API_KEY).send(body);
 
     expect(res.status).toBe(400);
   });
@@ -62,7 +62,7 @@ describe('POST /api/addresses/resolve', () => {
     });
 
     const res = await request(app)
-      .post('/api/addresses/resolve')
+      .post('/api/addresses/resolve').set('x-api-key', process.env.API_KEY)
       .send({ rawAddress: 'Completely made up nonexistent place' });
 
     expect(res.status).toBe(422);

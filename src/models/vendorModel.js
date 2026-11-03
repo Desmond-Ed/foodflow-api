@@ -18,7 +18,7 @@ async function getVendorMenu(vendorId) {
   // fall back to MySQL on a cache miss. This is the kind of read-heavy
   // endpoint caching helps most with at scale.
   try {
-    if (redisClient.isOpen) {
+    if (redisClient.isReady) {
       const cached = await redisClient.get(cacheKey);
       if (cached) {
         logger.info(`cache hit: ${cacheKey}`);
@@ -35,7 +35,7 @@ async function getVendorMenu(vendorId) {
   );
 
   try {
-    if (redisClient.isOpen) {
+    if (redisClient.isReady) {
       await redisClient.setEx(cacheKey, MENU_CACHE_TTL_SECONDS, JSON.stringify(rows));
     }
   } catch (err) {
@@ -47,7 +47,7 @@ async function getVendorMenu(vendorId) {
 
 async function invalidateMenuCache(vendorId) {
   const cacheKey = `vendor:${vendorId}:menu`;
-  if (redisClient.isOpen) {
+  if (redisClient.isReady) {
     await redisClient.del(cacheKey);
   }
 }

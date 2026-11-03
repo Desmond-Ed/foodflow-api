@@ -77,7 +77,7 @@ async function getFromCache(normalizedAddress) {
   const cacheKey = `geocode:${normalizedAddress}`;
 
   try {
-    if (redisClient.isOpen) {
+    if (redisClient.isReady) {
       const cached = await redisClient.get(cacheKey);
       if (cached) {
         logger.info(`cache hit: ${cacheKey}`);
@@ -100,7 +100,7 @@ async function saveToCache(rawAddress, resolved) {
   const cacheKey = `geocode:${resolved.normalized_address}`;
 
   try {
-    if (redisClient.isOpen) {
+    if (redisClient.isReady) {
       await redisClient.setEx(cacheKey, GEOCODE_CACHE_TTL_SECONDS, JSON.stringify(resolved));
     }
   } catch (err) {

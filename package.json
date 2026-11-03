@@ -1,14 +1,16 @@
 {
   "name": "foodflow-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Food delivery backend API with address resolution and Paystack payments.",
+  "main": "src/server.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
     "test": "jest --runInBand"
   },
   "keywords": [],

@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const request = require('supertest');
 const createApp = require('../src/app');
 const { pool } = require('../src/config/db');
+const logger = require('../src/utils/logger');
 
 process.env.PAYSTACK_SECRET_KEY = 'sk_test_abc123';
 
@@ -53,7 +54,7 @@ describe('POST /api/payments/initialize', () => {
     mockPaystackSuccess();
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(201);
@@ -68,7 +69,7 @@ describe('POST /api/payments/initialize', () => {
     pool.query.mockResolvedValueOnce([[undefined]]);
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 999, email: 'customer@example.com' });
 
     expect(res.status).toBe(404);
@@ -76,7 +77,7 @@ describe('POST /api/payments/initialize', () => {
 
   it.each(['abc', 0, 1.5])('rejects orderId %p with a 400', async (orderId) => {
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId, email: 'customer@example.com' });
 
     expect(res.status).toBe(400);
@@ -84,14 +85,14 @@ describe('POST /api/payments/initialize', () => {
   });
 
   it('rejects a missing email with a 400', async () => {
-    const res = await request(app).post('/api/payments/initialize').send({ orderId: 1 });
+    const res = await request(app).post('/api/payments/initialize').set('x-api-key', process.env.API_KEY).send({ orderId: 1 });
     expect(res.status).toBe(400);
   });
 
   it('rejects a request with no body instead of throwing a 500', async () => {
     global.fetch = jest.fn();
 
-    const res = await request(app).post('/api/payments/initialize');
+    const res = await request(app).post('/api/payments/initialize').set('x-api-key', process.env.API_KEY);
 
     expect(res.status).toBe(400);
     expect(res.body.error.message).toBe('orderId must be a positive integer');
@@ -102,7 +103,7 @@ describe('POST /api/payments/initialize', () => {
     'rejects malformed email %p with a 400',
     async (email) => {
       const res = await request(app)
-        .post('/api/payments/initialize')
+        .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
         .send({ orderId: 1, email });
 
       expect(res.status).toBe(400);
@@ -115,7 +116,7 @@ describe('POST /api/payments/initialize', () => {
     global.fetch = jest.fn();
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(409);
@@ -126,16 +127,37 @@ describe('POST /api/payments/initialize', () => {
   it('rejects when a payment is already pending without calling Paystack', async () => {
     pool.query
       .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
-      .mockResolvedValueOnce([[{ id: 5, status: 'pending' }]]);
+      .mockResolvedValueOnce([[{ id: 5, status: 'pending', created_at: new Date().toISOString() }]]);
     global.fetch = jest.fn();
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(409);
     expect(res.body.error.message).toBe('A payment is already pending for this order');
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('allows a retry when the pending payment is older than the TTL', async () => {
+    const staleCreatedAt = new Date(
+      Date.now() - 31 * 60 * 1000
+    ).toISOString();
+
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, total_naira: '3500.00', status: 'pending' }]])
+      .mockResolvedValueOnce([[{ id: 5, status: 'pending', created_at: staleCreatedAt }]])
+      .mockResolvedValueOnce([{}]); // createPayment insert
+
+    mockPaystackSuccess();
+
+    const res = await request(app)
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
+      .send({ orderId: 1, email: 'customer@example.com' });
+
+    expect(res.status).toBe(201);
+    expect(pool.query).toHaveBeenCalledTimes(3);
+    expect(pool.query.mock.calls[2][0]).toMatch(/INSERT INTO payments/);
   });
 
   it('rejects when the order has already been paid', async () => {
@@ -144,7 +166,7 @@ describe('POST /api/payments/initialize', () => {
       .mockResolvedValueOnce([[{ id: 5, status: 'success' }]]);
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(409);
@@ -160,7 +182,7 @@ describe('POST /api/payments/initialize', () => {
     mockPaystackSuccess();
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(201);
@@ -178,7 +200,7 @@ describe('POST /api/payments/initialize', () => {
     global.fetch = jest.fn().mockRejectedValueOnce(abortError);
 
     const res = await request(app)
-      .post('/api/payments/initialize')
+      .post('/api/payments/initialize').set('x-api-key', process.env.API_KEY)
       .send({ orderId: 1, email: 'customer@example.com' });
 
     expect(res.status).toBe(502);
@@ -187,25 +209,27 @@ describe('POST /api/payments/initialize', () => {
 });
 
 describe('POST /api/payments/webhook', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
 
   it('accepts a validly signed charge.success event and updates the order', async () => {
     const payload = {
       event: 'charge.success',
-      data: { id: 555, reference: 'foodflow_1_abc123' },
+      data: { id: 555, reference: 'foodflow_1_abc123', amount: 350000, currency: 'NGN' },
     };
     const rawBody = JSON.stringify(payload);
     const signature = signBody(rawBody);
 
-    pool.getConnection.mockResolvedValueOnce(
-      mockConnection([
-        [[undefined]], // SELECT processed_webhook_events -> not found
-        [{}], // INSERT processed_webhook_events
-        [[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
-        [{}], // UPDATE payments
-        [{}], // UPDATE orders
-      ])
-    );
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+      [{ affectedRows: 1 }], // UPDATE payments
+      [{ affectedRows: 1 }], // UPDATE orders
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
 
     const res = await request(app)
       .post('/api/payments/webhook')
@@ -215,6 +239,156 @@ describe('POST /api/payments/webhook', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.received).toBe(true);
+
+    const orderUpdate = connection.query.mock.calls.find(([sql]) =>
+      /UPDATE orders SET status = "accepted"/.test(sql)
+    );
+    expect(orderUpdate).toBeDefined();
+    expect(orderUpdate[1]).toEqual([1]);
+  });
+
+  it('logs an error when a successful payment is for an order that is no longer pending', async () => {
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {});
+    const payload = {
+      event: 'charge.success',
+      data: { id: 563, reference: 'foodflow_1_abc123', amount: 350000, currency: 'NGN' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+      [{ affectedRows: 1 }], // UPDATE payments
+      [{ affectedRows: 0 }], // UPDATE orders -> order is not pending
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'paid order not pending, manual refund needed: order 1, reference foodflow_1_abc123'
+    );
+  });
+
+  it('acknowledges an unknown payment reference with a 200 and a warn log', async () => {
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const payload = {
+      event: 'charge.success',
+      data: { id: 564, reference: 'unknown_reference', amount: 350000, currency: 'NGN' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[undefined]], // SELECT payments -> unknown reference
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ received: true, ignored: true });
+    expect(connection.rollback).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('unknown reference'));
+  });
+
+  it('ignores events other than charge.success without touching the database', async () => {
+    const payload = {
+      event: 'charge.failed',
+      data: { id: 560, reference: 'foodflow_1_abc123' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ received: true, ignored: true });
+    expect(pool.getConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['amount', { amount: 100, currency: 'NGN' }],
+    ['currency', { amount: 350000, currency: 'USD' }],
+  ])('ignores a charge.success with a mismatched %s', async (_label, overrides) => {
+    const payload = {
+      event: 'charge.success',
+      data: { id: 561, reference: 'foodflow_1_abc123', ...overrides },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ received: true, ignored: true });
+    expect(connection.rollback).toHaveBeenCalled();
+    expect(connection.commit).not.toHaveBeenCalled();
+
+    const orderUpdate = connection.query.mock.calls.find(([sql]) =>
+      /UPDATE orders SET status = "accepted"/.test(sql)
+    );
+    expect(orderUpdate).toBeUndefined();
+  });
+
+  it('does not overwrite a payment that is no longer pending', async () => {
+    const payload = {
+      event: 'charge.success',
+      data: { id: 562, reference: 'foodflow_1_abc123', amount: 350000, currency: 'NGN' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[{ id: 10, order_id: 1, amount_naira: '3500.00', status: 'success', paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+      [{ affectedRows: 0 }], // UPDATE payments guarded by status = 'pending'
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(connection.commit).toHaveBeenCalled();
+    expect(connection.rollback).not.toHaveBeenCalled();
+
+    const orderUpdate = connection.query.mock.calls.find(([sql]) =>
+      /UPDATE orders SET status = "accepted"/.test(sql)
+    );
+    expect(orderUpdate).toBeUndefined();
   });
 
   it('rejects a tampered payload with a 401', async () => {
@@ -245,7 +419,10 @@ describe('POST /api/payments/webhook', () => {
   });
 
   it('processes the same event_id only once (idempotency)', async () => {
-    const payload = { event: 'charge.success', data: { id: 558, reference: 'foodflow_1_abc123' } };
+    const payload = {
+      event: 'charge.success',
+      data: { id: 558, reference: 'foodflow_1_abc123', amount: 350000, currency: 'NGN' },
+    };
     const rawBody = JSON.stringify(payload);
     const signature = signBody(rawBody);
 
@@ -254,9 +431,9 @@ describe('POST /api/payments/webhook', () => {
       mockConnection([
         [[undefined]],
         [{}],
-        [[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_abc123' }]],
-        [{}],
-        [{}],
+        [[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_abc123' }]],
+        [{ affectedRows: 1 }],
+        [{ affectedRows: 1 }],
       ])
     );
 
@@ -299,9 +476,9 @@ describe('processPaymentWebhookEvent under real concurrency', () => {
         .fn()
         .mockResolvedValueOnce([[undefined]]) // SELECT processed_webhook_events -> not found
         .mockResolvedValueOnce([{}]) // INSERT succeeds
-        .mockResolvedValueOnce([[{ id: 10, order_id: 1, paystack_reference: 'foodflow_1_race' }]]) // SELECT payment
-        .mockResolvedValueOnce([{}]) // UPDATE payments
-        .mockResolvedValueOnce([{}]), // UPDATE orders
+        .mockResolvedValueOnce([[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_race' }]]) // SELECT payment
+        .mockResolvedValueOnce([{ affectedRows: 1 }]) // UPDATE payments
+        .mockResolvedValueOnce([{ affectedRows: 1 }]), // UPDATE orders
       commit: jest.fn(),
       rollback: jest.fn(),
       release: jest.fn(),
@@ -332,6 +509,8 @@ describe('processPaymentWebhookEvent under real concurrency', () => {
       eventType: 'charge.success',
       reference: 'foodflow_1_race',
       succeeded: true,
+      amount: 350000,
+      currency: 'NGN',
     };
 
     // Fire both concurrently, the way two near-simultaneous Paystack retries would arrive.
@@ -356,7 +535,7 @@ describe('GET /api/payments/:orderId/status', () => {
       [{ order_id: 1, paystack_reference: 'foodflow_1_abc123', status: 'success', amount_naira: '3500.00' }],
     ]);
 
-    const res = await request(app).get('/api/payments/1/status');
+    const res = await request(app).get('/api/payments/1/status').set('x-api-key', process.env.API_KEY);
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('success');
@@ -365,7 +544,7 @@ describe('GET /api/payments/:orderId/status', () => {
   it('returns a 404 when there is no payment for the order', async () => {
     pool.query.mockResolvedValueOnce([[undefined]]);
 
-    const res = await request(app).get('/api/payments/999/status');
+    const res = await request(app).get('/api/payments/999/status').set('x-api-key', process.env.API_KEY);
 
     expect(res.status).toBe(404);
   });

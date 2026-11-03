@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: foodflow-api
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_SSL
+        value: "true"
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL_CA
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_TLS_CA
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: NOMINATIM_USER_AGENT
+        sync: false
+      - key: NOMINATIM_MIN_INTERVAL_MS
+        sync: false

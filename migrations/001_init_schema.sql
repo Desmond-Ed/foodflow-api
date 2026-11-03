@@ -57,12 +57,3 @@ CREATE TABLE IF NOT EXISTS order_items (
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
   FOREIGN KEY (menu_item_id) REFERENCES menu_items(id)
 );
-
--- Seed data for local testing
-INSERT INTO vendors (name, city) VALUES ('Mama Nkechi Kitchen', 'Lagos'), ('Chicken Republic - Ikeja', 'Lagos');
-INSERT INTO menu_items (vendor_id, name, price_naira) VALUES
-  (1, 'Jollof Rice + Chicken', 3500.00),
-  (1, 'Egusi Soup + Pounded Yam', 4000.00),
-  (2, 'Spicy Chicken Meal', 3200.00);
-INSERT INTO riders (name, phone) VALUES ('Tunde Bello', '08012345678');
-INSERT INTO customers (name, phone) VALUES ('Desmond Eguono', '08087654321');
