@@ -16,10 +16,6 @@ CREATE TABLE IF NOT EXISTS resolved_addresses (
 );
 
 -- Vendors need known coordinates to quote a delivery distance/fee against.
--- Existing seeded vendors are backfilled with real Ikeja, Lagos coordinates.
 ALTER TABLE vendors
   ADD COLUMN latitude DECIMAL(10,7) NULL,
   ADD COLUMN longitude DECIMAL(10,7) NULL;
-
-UPDATE vendors SET latitude = 6.6018, longitude = 3.3515 WHERE name = 'Mama Nkechi Kitchen';
-UPDATE vendors SET latitude = 6.6059, longitude = 3.3491 WHERE name = 'Chicken Republic - Ikeja';

@@ -34,6 +34,8 @@ describe('resolveAddress', () => {
   afterEach(() => {
     jest.clearAllMocks();
     global.fetch = originalFetch;
+    redisClient.isOpen = false;
+    redisClient.isReady = false;
   });
 
   it('rejects a missing rawAddress with a 400', async () => {
@@ -41,7 +43,7 @@ describe('resolveAddress', () => {
   });
 
   it('returns a Redis cache hit without calling Nominatim', async () => {
-    redisClient.isOpen = true;
+    redisClient.isReady = true;
     redisClient.get.mockResolvedValueOnce(
       JSON.stringify({
         normalized_address: '12 Allen Avenue, Lagos, Nigeria',
@@ -58,11 +60,11 @@ describe('resolveAddress', () => {
     expect(result.latitude).toBeCloseTo(6.6018);
     expect(global.fetch).not.toHaveBeenCalled();
 
-    redisClient.isOpen = false;
+    redisClient.isReady = false;
   });
 
   it('falls back to the MySQL cache when Redis misses', async () => {
-    redisClient.isOpen = false;
+    redisClient.isReady = false;
     pool.query.mockResolvedValueOnce([
       [
         {
@@ -81,8 +83,30 @@ describe('resolveAddress', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('geocodes via Nominatim on a full cache miss and caches the result', async () => {
+  it('skips Redis and uses MySQL when the client is open but not ready', async () => {
     redisClient.isOpen = true;
+    redisClient.isReady = false;
+    pool.query.mockResolvedValueOnce([
+      [
+        {
+          normalized_address: '12 Allen Avenue, Lagos, Nigeria',
+          latitude: '6.6018000',
+          longitude: '3.3490000',
+          confidence: 'high',
+        },
+      ],
+    ]);
+    global.fetch = jest.fn();
+
+    const result = await resolveAddress('12 Allen Avenue');
+
+    expect(result.source).toBe('cache');
+    expect(redisClient.get).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('geocodes via Nominatim on a full cache miss and caches the result', async () => {
+    redisClient.isReady = true;
     redisClient.get.mockResolvedValueOnce(null);
     pool.query
       .mockResolvedValueOnce([[]]) // DB cache miss
@@ -105,7 +129,7 @@ describe('resolveAddress', () => {
   });
 
   it('falls back to the landmark table when Nominatim returns nothing', async () => {
-    redisClient.isOpen = false;
+    redisClient.isReady = false;
     pool.query.mockResolvedValueOnce([[]]).mockResolvedValueOnce([{}]);
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,
@@ -120,7 +144,7 @@ describe('resolveAddress', () => {
   });
 
   it('falls back to the landmark table when Nominatim times out', async () => {
-    redisClient.isOpen = false;
+    redisClient.isReady = false;
     pool.query.mockResolvedValueOnce([[]]).mockResolvedValueOnce([{}]);
     const timeoutError = new Error('The operation was aborted due to timeout');
     timeoutError.name = 'TimeoutError';
@@ -134,7 +158,7 @@ describe('resolveAddress', () => {
   });
 
   it('throws a 422 when nothing matches and Nominatim has nothing', async () => {
-    redisClient.isOpen = false;
+    redisClient.isReady = false;
     pool.query.mockResolvedValueOnce([[]]);
     global.fetch = jest.fn().mockResolvedValueOnce({
       ok: true,

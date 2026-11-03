@@ -2,6 +2,7 @@ require('./setup');
 const request = require('supertest');
 const createApp = require('../src/app');
 const { pool } = require('../src/config/db');
+const { redisClient } = require('../src/config/redis');
 
 const app = createApp();
 
@@ -25,7 +26,11 @@ describe('GET /api/vendors', () => {
 });
 
 describe('GET /api/vendors/:id/menu', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    redisClient.isOpen = false;
+    redisClient.isReady = false;
+  });
 
   it('returns the menu for a valid vendor id', async () => {
     pool.query.mockResolvedValueOnce([
@@ -36,6 +41,20 @@ describe('GET /api/vendors/:id/menu', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data[0].name).toBe('Jollof Rice + Chicken');
+  });
+
+  it('falls back to MySQL when Redis is open but not ready', async () => {
+    redisClient.isOpen = true;
+    redisClient.isReady = false;
+    pool.query.mockResolvedValueOnce([
+      [{ id: 1, name: 'Jollof Rice + Chicken', price_naira: '3500.00', is_available: 1 }],
+    ]);
+
+    const res = await request(app).get('/api/vendors/1/menu');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].name).toBe('Jollof Rice + Chicken');
+    expect(redisClient.get).not.toHaveBeenCalled();
   });
 
   it('rejects a non-numeric vendor id with a 400', async () => {

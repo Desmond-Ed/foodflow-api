@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { ApiError } = require('../middleware/errorHandler');
 
 const VALID_STATUSES = [
   'pending',
@@ -9,10 +10,11 @@ const VALID_STATUSES = [
   'cancelled',
 ];
 
+const PAYMENT_ONLY_STATUSES = new Set(['pending', 'accepted']);
+
 // Orders that a status is allowed to move FROM, keyed by the next status.
-// This stops an order jumping straight from "pending" to "delivered", for example.
+// "accepted" is deliberately absent: only the payment webhook can set it.
 const ALLOWED_TRANSITIONS = {
-  accepted: ['pending'],
   preparing: ['accepted'],
   picked_up: ['preparing'],
   delivered: ['picked_up'],
@@ -26,6 +28,8 @@ async function createOrder({ customerId, vendorId, items }) {
     await connection.beginTransaction();
 
     let total = 0;
+    const pricedItems = [];
+
     for (const item of items) {
       const [[menuItem]] = await connection.query(
         'SELECT price_naira FROM menu_items WHERE id = ? AND vendor_id = ? AND is_available = TRUE',
@@ -37,6 +41,12 @@ async function createOrder({ customerId, vendorId, items }) {
           { statusCode: 400 }
         );
       }
+
+      pricedItems.push({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPriceNaira: menuItem.price_naira,
+      });
       total += Number(menuItem.price_naira) * item.quantity;
     }
 
@@ -46,14 +56,10 @@ async function createOrder({ customerId, vendorId, items }) {
     );
     const orderId = orderResult.insertId;
 
-    for (const item of items) {
-      const [[menuItem]] = await connection.query(
-        'SELECT price_naira FROM menu_items WHERE id = ?',
-        [item.menuItemId]
-      );
+    for (const item of pricedItems) {
       await connection.query(
         'INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_naira) VALUES (?, ?, ?, ?)',
-        [orderId, item.menuItemId, item.quantity, menuItem.price_naira]
+        [orderId, item.menuItemId, item.quantity, item.unitPriceNaira]
       );
     }
 
@@ -61,6 +67,9 @@ async function createOrder({ customerId, vendorId, items }) {
     return { orderId, total };
   } catch (err) {
     await connection.rollback();
+    if (err.code === 'ER_NO_REFERENCED_ROW_2') {
+      throw new ApiError(400, 'Unknown customer or vendor');
+    }
     throw err;
   } finally {
     connection.release();
@@ -74,20 +83,24 @@ async function getOrderById(orderId) {
 
 async function updateOrderStatus(orderId, newStatus) {
   if (!VALID_STATUSES.includes(newStatus)) {
-    throw Object.assign(new Error(`Invalid status: ${newStatus}`), { statusCode: 400 });
+    throw new ApiError(400, `Invalid status: ${newStatus}`);
   }
 
   const order = await getOrderById(orderId);
   if (!order) {
-    throw Object.assign(new Error('Order not found'), { statusCode: 404 });
+    throw new ApiError(404, 'Order not found');
+  }
+
+  if (PAYMENT_ONLY_STATUSES.has(newStatus)) {
+    throw new ApiError(
+      409,
+      'Orders cannot be set to "pending" or "accepted" via this endpoint; "accepted" is set only by payment confirmation'
+    );
   }
 
   const allowedFrom = ALLOWED_TRANSITIONS[newStatus];
   if (allowedFrom && !allowedFrom.includes(order.status)) {
-    throw Object.assign(
-      new Error(`Cannot move order from "${order.status}" to "${newStatus}"`),
-      { statusCode: 409 }
-    );
+    throw new ApiError(409, `Cannot move order from "${order.status}" to "${newStatus}"`);
   }
 
   const [result] = await pool.query(
@@ -95,10 +108,7 @@ async function updateOrderStatus(orderId, newStatus) {
     [newStatus, orderId, order.status]
   );
   if (result.affectedRows === 0) {
-    throw Object.assign(
-      new Error('Order status was changed concurrently; please retry'),
-      { statusCode: 409 }
-    );
+    throw new ApiError(409, 'Order status was changed concurrently; please retry');
   }
 
   return { ...order, status: newStatus };

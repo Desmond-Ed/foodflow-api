@@ -29,7 +29,7 @@ async function getPaymentByReference(reference) {
 // them inconsistent (e.g. event marked processed but order still pending).
 // If the event_id already exists, the whole thing is a no-op: Paystack
 // retries on timeout, so the same event can legitimately arrive twice.
-async function processPaymentWebhookEvent({ eventId, eventType, reference, succeeded }) {
+async function processPaymentWebhookEvent({ eventId, eventType, reference, succeeded, amount, currency }) {
   const connection = await pool.getConnection();
 
   try {
@@ -74,11 +74,33 @@ async function processPaymentWebhookEvent({ eventId, eventType, reference, succe
       throw new ApiError(404, `No payment found for reference ${reference}`);
     }
 
+    const expectedAmount = Math.round(Number(payment.amount_naira) * 100);
+    const receivedAmount = Number(amount);
+
+    if (succeeded && (currency !== 'NGN' || receivedAmount !== expectedAmount)) {
+      await connection.rollback();
+      return {
+        mismatch: true,
+        orderId: payment.order_id,
+        expectedAmount,
+        receivedAmount,
+        currency,
+      };
+    }
+
     const newPaymentStatus = succeeded ? 'success' : 'failed';
-    await connection.query('UPDATE payments SET status = ? WHERE id = ?', [
-      newPaymentStatus,
-      payment.id,
-    ]);
+    const [updateResult] = await connection.query(
+      'UPDATE payments SET status = ? WHERE id = ? AND status = "pending"',
+      [newPaymentStatus, payment.id]
+    );
+
+    // If the payment is no longer pending, another event already settled it.
+    // Never overwrite a terminal status, and never accept the order from a
+    // stale event.
+    if (updateResult.affectedRows === 0) {
+      await connection.commit();
+      return { alreadyProcessed: true };
+    }
 
     // Payment confirmation is what moves an order out of "pending" - never
     // the client-side redirect alone, since that can be spoofed or simply

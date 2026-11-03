@@ -6,7 +6,42 @@ const { redisClient } = require('../src/config/redis');
 
 const app = createApp();
 
-describe('GET /api/health', () => {
+describe('GET /api/health (liveness)', () => {
+  beforeEach(() => {
+    checkDbConnection.mockReset();
+    redisClient.isOpen = false;
+    redisClient.isReady = false;
+  });
+
+  afterEach(() => {
+    checkDbConnection.mockReset();
+    redisClient.isOpen = false;
+    redisClient.isReady = false;
+  });
+
+  it('always returns ok without checking dependencies', async () => {
+    checkDbConnection.mockRejectedValue(new Error('mysql unavailable'));
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      status: 'ok',
+      uptimeSeconds: expect.any(Number),
+    });
+    expect(checkDbConnection).not.toHaveBeenCalled();
+  });
+
+  it('stays ok when Redis is down', async () => {
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.dependencies).toBeUndefined();
+  });
+});
+
+describe('GET /api/ready (readiness)', () => {
   beforeEach(() => {
     checkDbConnection.mockReset();
     redisClient.isOpen = false;
@@ -24,7 +59,7 @@ describe('GET /api/health', () => {
     redisClient.isOpen = true;
     redisClient.isReady = true;
 
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/ready');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
@@ -38,7 +73,7 @@ describe('GET /api/health', () => {
     redisClient.isOpen = false;
     redisClient.isReady = false;
 
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/ready');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('degraded');
@@ -51,7 +86,7 @@ describe('GET /api/health', () => {
     redisClient.isOpen = true;
     redisClient.isReady = false;
 
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/ready');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('degraded');
@@ -64,7 +99,7 @@ describe('GET /api/health', () => {
     redisClient.isOpen = true;
     redisClient.isReady = true;
 
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/ready');
 
     expect(res.status).toBe(503);
     expect(res.body.status).toBe('degraded');

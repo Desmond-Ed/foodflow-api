@@ -6,6 +6,7 @@ const { generalLimiter, webhookLimiter } = require('./middleware/rateLimiters');
 const { resolveTrustProxy } = require('./config/trustProxy');
 const requestLogger = require('./middleware/requestLogger');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+const { requireApiKey } = require('./middleware/requireApiKey');
 const vendorRoutes = require('./routes/vendors');
 const orderRoutes = require('./routes/orders');
 const healthRoutes = require('./routes/health');
@@ -13,13 +14,26 @@ const addressRoutes = require('./routes/addresses');
 const deliveryRoutes = require('./routes/delivery');
 const paymentRoutes = require('./routes/payments');
 
+function buildCorsOptions(env = process.env) {
+  const configuredOrigins = String(env.CORS_ORIGIN || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (configuredOrigins.length > 0) {
+    return { origin: configuredOrigins.includes('*') ? true : configuredOrigins };
+  }
+
+  return { origin: env.NODE_ENV === 'production' ? false : true };
+}
+
 function createApp() {
   const app = express();
 
   app.set('trust proxy', resolveTrustProxy(process.env.TRUST_PROXY));
 
   app.use(helmet());
-  app.use(cors());
+  app.use(cors(buildCorsOptions()));
 
   // Paystack's webhook signature is an HMAC over the *raw* request bytes.
   // If the global JSON parser ran first, it would re-serialize the body and
@@ -46,18 +60,18 @@ function createApp() {
     }
   );
 
-  app.use(express.json());
+  app.use(express.json({ limit: '100kb' }));
   app.use(requestLogger);
 
   // Basic abuse protection: 100 requests per minute per IP, excluding the
   // Paystack webhook which is limited separately above.
   app.use(generalLimiter);
 
-  app.use('/api/health', healthRoutes);
+  app.use('/api', healthRoutes);
   app.use('/api/vendors', vendorRoutes);
-  app.use('/api/orders', orderRoutes);
-  app.use('/api/addresses', addressRoutes);
-  app.use('/api/delivery', deliveryRoutes);
+  app.use('/api/orders', requireApiKey, orderRoutes);
+  app.use('/api/addresses', requireApiKey, addressRoutes);
+  app.use('/api/delivery', requireApiKey, deliveryRoutes);
   app.use('/api/payments', paymentRoutes);
 
   app.use(notFoundHandler);
@@ -67,3 +81,4 @@ function createApp() {
 }
 
 module.exports = createApp;
+module.exports.buildCorsOptions = buildCorsOptions;

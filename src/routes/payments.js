@@ -8,15 +8,32 @@ const {
 } = require('../models/paymentModel');
 const { getOrderById } = require('../models/orderModel');
 const { ApiError } = require('../middleware/errorHandler');
+const { requireApiKey } = require('../middleware/requireApiKey');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEFAULT_PENDING_TTL_MINUTES = 30;
+
+function getPendingTtlMs() {
+  const configured = Number(process.env.PAYMENT_PENDING_TTL_MINUTES);
+  const minutes =
+    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PENDING_TTL_MINUTES;
+  return minutes * 60 * 1000;
+}
+
+function isPendingPaymentExpired(payment, now = Date.now()) {
+  const createdAt = new Date(payment.created_at).getTime();
+  if (!Number.isFinite(createdAt)) {
+    return true;
+  }
+  return now - createdAt >= getPendingTtlMs();
+}
 
 // POST /api/payments/initialize
 // Body: { orderId, email } -> Paystack checkout URL
-router.post('/initialize', async (req, res, next) => {
+router.post('/initialize', requireApiKey, async (req, res, next) => {
   try {
     const { orderId, email } = req.body || {};
 
@@ -39,11 +56,11 @@ router.post('/initialize', async (req, res, next) => {
 
     const existingPayment = await getPaymentByOrderId(orderId);
     if (existingPayment) {
-      if (existingPayment.status === 'pending') {
-        throw new ApiError(409, 'A payment is already pending for this order');
-      }
       if (existingPayment.status === 'success') {
         throw new ApiError(409, 'Order has already been paid');
+      }
+      if (existingPayment.status === 'pending' && !isPendingPaymentExpired(existingPayment)) {
+        throw new ApiError(409, 'A payment is already pending for this order');
       }
     }
 
@@ -100,16 +117,43 @@ router.post('/webhook', async (req, res, next) => {
     }
 
     const event = req.body;
-    const eventId = event?.data?.id ? String(event.data.id) : event?.id;
     const eventType = event?.event;
-    const reference = event?.data?.reference;
 
-    if (!eventId || !eventType || !reference) {
+    if (!eventType) {
       throw new ApiError(400, 'Malformed webhook payload');
     }
 
-    const succeeded = eventType === 'charge.success';
-    const result = await processPaymentWebhookEvent({ eventId, eventType, reference, succeeded });
+    // Paystack sends many event types. Only a successful charge is allowed to
+    // settle a payment or accept an order; everything else is acknowledged so
+    // Paystack stops retrying it, but deliberately ignored.
+    if (eventType !== 'charge.success') {
+      logger.info(`payment webhook event ignored: ${eventType}`);
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    const eventId = event?.data?.id ? `${eventType}:${event.data.id}` : null;
+    const reference = event?.data?.reference;
+
+    if (!eventId || !reference) {
+      throw new ApiError(400, 'Malformed webhook payload');
+    }
+
+    const result = await processPaymentWebhookEvent({
+      eventId,
+      eventType,
+      reference,
+      succeeded: true,
+      amount: event?.data?.amount,
+      currency: event?.data?.currency,
+    });
+
+    if (result.mismatch) {
+      logger.error(
+        `payment webhook amount/currency mismatch for reference ${reference}: ` +
+          `expected ${result.expectedAmount} NGN kobo, received ${result.receivedAmount} ${result.currency}`
+      );
+      return res.status(200).json({ received: true, ignored: true });
+    }
 
     res.status(200).json({ received: true });
 
@@ -127,7 +171,7 @@ router.post('/webhook', async (req, res, next) => {
 });
 
 // GET /api/payments/:orderId/status
-router.get('/:orderId/status', async (req, res, next) => {
+router.get('/:orderId/status', requireApiKey, async (req, res, next) => {
   try {
     const orderId = Number(req.params.orderId);
     if (!Number.isInteger(orderId)) {

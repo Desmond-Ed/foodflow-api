@@ -35,7 +35,7 @@ describe('POST /api/delivery/quote', () => {
     });
 
     const res = await request(app)
-      .post('/api/delivery/quote')
+      .post('/api/delivery/quote').set('x-api-key', process.env.API_KEY)
       .send({ vendorId: 1, customerAddress: 'Somewhere' });
 
     const distance = haversineDistanceKm(6.6018, 3.3515, 6.6018, 3.36);
@@ -50,7 +50,7 @@ describe('POST /api/delivery/quote', () => {
     ['missing vendorId', { customerAddress: 'Somewhere' }],
     ['missing customerAddress', { vendorId: 1 }],
   ])('rejects a request with %s with a 400', async (label, body) => {
-    const res = await request(app).post('/api/delivery/quote').send(body);
+    const res = await request(app).post('/api/delivery/quote').set('x-api-key', process.env.API_KEY).send(body);
 
     expect(res.status).toBe(400);
   });
@@ -59,7 +59,7 @@ describe('POST /api/delivery/quote', () => {
     pool.query.mockResolvedValueOnce([[undefined]]);
 
     const res = await request(app)
-      .post('/api/delivery/quote')
+      .post('/api/delivery/quote').set('x-api-key', process.env.API_KEY)
       .send({ vendorId: 999, customerAddress: 'Somewhere' });
 
     expect(res.status).toBe(404);
@@ -69,7 +69,7 @@ describe('POST /api/delivery/quote', () => {
     pool.query.mockResolvedValueOnce([[{ ...vendor, latitude: null, longitude: null }]]);
 
     const res = await request(app)
-      .post('/api/delivery/quote')
+      .post('/api/delivery/quote').set('x-api-key', process.env.API_KEY)
       .send({ vendorId: 1, customerAddress: 'Somewhere' });
 
     expect(res.status).toBe(422);
@@ -86,7 +86,7 @@ describe('POST /api/delivery/quote', () => {
     });
 
     const res = await request(app)
-      .post('/api/delivery/quote')
+      .post('/api/delivery/quote').set('x-api-key', process.env.API_KEY)
       .send({ vendorId: 1, customerAddress: 'Far Away' });
 
     expect(res.status).toBe(422);
