@@ -189,18 +189,19 @@ curl -X PATCH http://localhost:3000/api/orders/1/status \
 
 ## Authentication
 
-Every endpoint except `/api/health`, `/api/ready`, and the Paystack webhook
-requires an `x-api-key` header matching `API_KEY`:
+Orders, addresses, delivery quotes, and payment initialize/status require an
+`x-api-key` header matching `API_KEY`:
 
 ```bash
-curl http://localhost:3000/api/vendors \
+curl http://localhost:3000/api/orders/1 \
   -H "x-api-key: $API_KEY"
 ```
 
-`API_KEY` is mandatory in production: the server refuses to start without it.
-The Paystack webhook is authenticated separately by verifying the
-`x-paystack-signature` HMAC against the raw request body, so it never accepts
-the API key.
+The public endpoints are `/api/health`, `/api/ready`, `/api/vendors`,
+`/api/vendors/:id/menu`, and the Paystack webhook. `API_KEY` is mandatory in
+production: the server refuses to start without it. The Paystack webhook is
+authenticated separately by verifying the `x-paystack-signature` HMAC against
+the raw request body, so it never accepts the API key.
 
 CORS is deny-by-default in production. Set `CORS_ORIGIN` to the exact browser
 origin that should be allowed (for example
