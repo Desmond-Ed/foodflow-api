@@ -105,14 +105,22 @@ async function processPaymentWebhookEvent({ eventId, eventType, reference, succe
     // Payment confirmation is what moves an order out of "pending" - never
     // the client-side redirect alone, since that can be spoofed or simply
     // never fire if the customer closes the tab.
+    let orderNotPending = false;
     if (succeeded) {
-      await connection.query('UPDATE orders SET status = "accepted" WHERE id = ? AND status = "pending"', [
-        payment.order_id,
-      ]);
+      const [orderUpdate] = await connection.query(
+        'UPDATE orders SET status = "accepted" WHERE id = ? AND status = "pending"',
+        [payment.order_id]
+      );
+      orderNotPending = orderUpdate.affectedRows === 0;
     }
 
     await connection.commit();
-    return { alreadyProcessed: false, orderId: payment.order_id, paymentStatus: newPaymentStatus };
+    return {
+      alreadyProcessed: false,
+      orderId: payment.order_id,
+      paymentStatus: newPaymentStatus,
+      orderNotPending,
+    };
   } catch (err) {
     await connection.rollback();
     throw err;

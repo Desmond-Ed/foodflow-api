@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { ApiError } = require('../middleware/errorHandler');
+const { isPendingPaymentExpired } = require('../utils/paymentTtl');
 
 const VALID_STATUSES = [
   'pending',
@@ -101,6 +102,19 @@ async function updateOrderStatus(orderId, newStatus) {
   const allowedFrom = ALLOWED_TRANSITIONS[newStatus];
   if (allowedFrom && !allowedFrom.includes(order.status)) {
     throw new ApiError(409, `Cannot move order from "${order.status}" to "${newStatus}"`);
+  }
+
+  // A customer who has already started checkout may still complete payment.
+  // Refuse to cancel while that payment is recent, otherwise the webhook can
+  // accept a cancelled order and require a manual refund.
+  if (newStatus === 'cancelled') {
+    const [[pendingPayment]] = await pool.query(
+      'SELECT id, created_at FROM payments WHERE order_id = ? AND status = "pending" ORDER BY id DESC LIMIT 1',
+      [orderId]
+    );
+    if (pendingPayment && !isPendingPaymentExpired(pendingPayment)) {
+      throw new ApiError(409, 'Order has a pending payment and cannot be cancelled yet');
+    }
   }
 
   const [result] = await pool.query(

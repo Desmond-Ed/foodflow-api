@@ -9,27 +9,12 @@ const {
 const { getOrderById } = require('../models/orderModel');
 const { ApiError } = require('../middleware/errorHandler');
 const { requireApiKey } = require('../middleware/requireApiKey');
+const { isPendingPaymentExpired } = require('../utils/paymentTtl');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEFAULT_PENDING_TTL_MINUTES = 30;
-
-function getPendingTtlMs() {
-  const configured = Number(process.env.PAYMENT_PENDING_TTL_MINUTES);
-  const minutes =
-    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PENDING_TTL_MINUTES;
-  return minutes * 60 * 1000;
-}
-
-function isPendingPaymentExpired(payment, now = Date.now()) {
-  const createdAt = new Date(payment.created_at).getTime();
-  if (!Number.isFinite(createdAt)) {
-    return true;
-  }
-  return now - createdAt >= getPendingTtlMs();
-}
 
 // POST /api/payments/initialize
 // Body: { orderId, email } -> Paystack checkout URL
@@ -138,14 +123,23 @@ router.post('/webhook', async (req, res, next) => {
       throw new ApiError(400, 'Malformed webhook payload');
     }
 
-    const result = await processPaymentWebhookEvent({
-      eventId,
-      eventType,
-      reference,
-      succeeded: true,
-      amount: event?.data?.amount,
-      currency: event?.data?.currency,
-    });
+    let result;
+    try {
+      result = await processPaymentWebhookEvent({
+        eventId,
+        eventType,
+        reference,
+        succeeded: true,
+        amount: event?.data?.amount,
+        currency: event?.data?.currency,
+      });
+    } catch (err) {
+      if (err.statusCode === 404) {
+        logger.warn(`payment webhook ignored: unknown reference ${reference}`);
+        return res.status(200).json({ received: true, ignored: true });
+      }
+      throw err;
+    }
 
     if (result.mismatch) {
       logger.error(
@@ -158,10 +152,16 @@ router.post('/webhook', async (req, res, next) => {
     res.status(200).json({ received: true });
 
     if (!result.alreadyProcessed) {
-      logger.info(`payment webhook processed: order ${result.orderId} -> ${result.paymentStatus}`);
-      notifyVendorOfPayment(result.orderId).catch((err) =>
-        logger.error(`vendor notification failed: ${err.message}`)
-      );
+      if (result.orderNotPending) {
+        logger.error(
+          `paid order not pending, manual refund needed: order ${result.orderId}, reference ${reference}`
+        );
+      } else {
+        logger.info(`payment webhook processed: order ${result.orderId} -> ${result.paymentStatus}`);
+        notifyVendorOfPayment(result.orderId).catch((err) =>
+          logger.error(`vendor notification failed: ${err.message}`)
+        );
+      }
     } else {
       logger.info(`duplicate webhook event ignored: ${eventId}`);
     }

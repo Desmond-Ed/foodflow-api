@@ -316,6 +316,11 @@ run against the free tiers of [Aiven](https://aiven.io) for MySQL and Valkey
    `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `NOMINATIM_USER_AGENT`, and
    `NOMINATIM_MIN_INTERVAL_MS`.
 
+Aiven MySQL defaults to the `defaultdb` database and the `avnadmin` user, so
+set `DB_NAME=defaultdb` unless you create a separate database. When setting
+`DB_SSL_CA`, paste the certificate with literal `\n` sequences (for example as
+a single-line environment variable); the app converts them to real newlines.
+
 The service builds with `npm ci --omit=dev`, starts with
 `node src/server.js`, and Render checks liveness at `/api/health`.
 
@@ -344,6 +349,14 @@ only the applied or skipped migration filenames, and stops at the first
 failure. It is safe to run again: already-applied migrations are skipped.
 In PowerShell, set the same values for the session with
 `$env:DB_HOST="..."` and remove them with `Remove-Item Env:DB_HOST`.
+
+### Seed development data
+
+`npm run seed` applies `seeds/dev_seed.sql` using the same `DB_*` and
+`DB_SSL*` variables as the app. It checks the `vendors` table first and does
+nothing if any vendors already exist, printing `skipped: vendors not empty`.
+It is intended for a fresh development or hosted database and prints no
+connection values.
 
 ### A note on the geocoding provider
 

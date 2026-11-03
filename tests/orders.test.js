@@ -186,6 +186,35 @@ describe('PATCH /api/orders/:id/status', () => {
     expect(res.body.data.status).toBe('preparing');
   });
 
+  it('rejects cancelling an order with a recent pending payment with a 409', async () => {
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, status: 'pending' }]]) // getOrderById
+      .mockResolvedValueOnce([[{ id: 5, created_at: new Date().toISOString() }]]); // pending payment
+
+    const res = await request(app)
+      .patch('/api/orders/1/status').set('x-api-key', process.env.API_KEY)
+      .send({ status: 'cancelled' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe('Order has a pending payment and cannot be cancelled yet');
+  });
+
+  it('allows cancelling when the pending payment is older than the TTL', async () => {
+    const staleCreatedAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+
+    pool.query
+      .mockResolvedValueOnce([[{ id: 1, status: 'pending' }]]) // getOrderById
+      .mockResolvedValueOnce([[{ id: 5, created_at: staleCreatedAt }]]) // expired payment
+      .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE orders
+
+    const res = await request(app)
+      .patch('/api/orders/1/status').set('x-api-key', process.env.API_KEY)
+      .send({ status: 'cancelled' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('cancelled');
+  });
+
   it('rejects pending to accepted with a 409', async () => {
     pool.query.mockResolvedValueOnce([[{ id: 1, status: 'pending' }]]);
 

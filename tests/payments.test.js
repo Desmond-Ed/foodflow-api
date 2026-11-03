@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const request = require('supertest');
 const createApp = require('../src/app');
 const { pool } = require('../src/config/db');
+const logger = require('../src/utils/logger');
 
 process.env.PAYSTACK_SECRET_KEY = 'sk_test_abc123';
 
@@ -208,7 +209,10 @@ describe('POST /api/payments/initialize', () => {
 });
 
 describe('POST /api/payments/webhook', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
 
   it('accepts a validly signed charge.success event and updates the order', async () => {
     const payload = {
@@ -241,6 +245,64 @@ describe('POST /api/payments/webhook', () => {
     );
     expect(orderUpdate).toBeDefined();
     expect(orderUpdate[1]).toEqual([1]);
+  });
+
+  it('logs an error when a successful payment is for an order that is no longer pending', async () => {
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => {});
+    const payload = {
+      event: 'charge.success',
+      data: { id: 563, reference: 'foodflow_1_abc123', amount: 350000, currency: 'NGN' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[{ id: 10, order_id: 1, amount_naira: '3500.00', paystack_reference: 'foodflow_1_abc123' }]], // SELECT payments
+      [{ affectedRows: 1 }], // UPDATE payments
+      [{ affectedRows: 0 }], // UPDATE orders -> order is not pending
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'paid order not pending, manual refund needed: order 1, reference foodflow_1_abc123'
+    );
+  });
+
+  it('acknowledges an unknown payment reference with a 200 and a warn log', async () => {
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const payload = {
+      event: 'charge.success',
+      data: { id: 564, reference: 'unknown_reference', amount: 350000, currency: 'NGN' },
+    };
+    const rawBody = JSON.stringify(payload);
+    const signature = signBody(rawBody);
+
+    const connection = mockConnection([
+      [[undefined]], // SELECT processed_webhook_events -> not found
+      [{}], // INSERT processed_webhook_events
+      [[undefined]], // SELECT payments -> unknown reference
+    ]);
+    pool.getConnection.mockResolvedValueOnce(connection);
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-paystack-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ received: true, ignored: true });
+    expect(connection.rollback).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('unknown reference'));
   });
 
   it('ignores events other than charge.success without touching the database', async () => {
