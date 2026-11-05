@@ -303,7 +303,8 @@ runs without any live database or external service.
 The repository includes a [Render](https://render.com) Blueprint
 (`render.yaml`) that provisions one free Node web service. It is designed to
 run against the free tiers of [Aiven](https://aiven.io) for MySQL and,
-optionally, Valkey (Redis-compatible). Live URL: _add after deploying_.
+optionally, Valkey (Redis-compatible). Live URL:
+https://foodflow-api-c1df.onrender.com
 
 MySQL is required. Redis/Valkey is an optional cache: leave `REDIS_URL` empty
 to run without it, or point it at any Redis-compatible instance. Every key is

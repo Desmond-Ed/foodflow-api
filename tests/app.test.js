@@ -64,3 +64,16 @@ describe('JSON body limit', () => {
     expect(res.status).toBe(413);
   });
 });
+
+describe('GET /', () => {
+  it('returns the project name and public links', async () => {
+    const res = await request(createApp()).get('/');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      name: 'FoodFlow API',
+      health: '/api/health',
+      vendors: '/api/vendors',
+    });
+  });
+});
