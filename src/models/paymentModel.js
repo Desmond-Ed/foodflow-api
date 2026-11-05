@@ -3,7 +3,7 @@ const { ApiError } = require('../middleware/errorHandler');
 
 async function createPayment({ orderId, reference, amountNaira }) {
   await pool.query(
-    'INSERT INTO payments (order_id, paystack_reference, amount_naira, status) VALUES (?, ?, ?, "pending")',
+    "INSERT INTO payments (order_id, paystack_reference, amount_naira, status) VALUES (?, ?, ?, 'pending')",
     [orderId, reference, amountNaira]
   );
 }
@@ -90,7 +90,7 @@ async function processPaymentWebhookEvent({ eventId, eventType, reference, succe
 
     const newPaymentStatus = succeeded ? 'success' : 'failed';
     const [updateResult] = await connection.query(
-      'UPDATE payments SET status = ? WHERE id = ? AND status = "pending"',
+      "UPDATE payments SET status = ? WHERE id = ? AND status = 'pending'",
       [newPaymentStatus, payment.id]
     );
 
@@ -108,7 +108,7 @@ async function processPaymentWebhookEvent({ eventId, eventType, reference, succe
     let orderNotPending = false;
     if (succeeded) {
       const [orderUpdate] = await connection.query(
-        'UPDATE orders SET status = "accepted" WHERE id = ? AND status = "pending"',
+        "UPDATE orders SET status = 'accepted' WHERE id = ? AND status = 'pending'",
         [payment.order_id]
       );
       orderNotPending = orderUpdate.affectedRows === 0;

@@ -241,7 +241,7 @@ describe('POST /api/payments/webhook', () => {
     expect(res.body.received).toBe(true);
 
     const orderUpdate = connection.query.mock.calls.find(([sql]) =>
-      /UPDATE orders SET status = "accepted"/.test(sql)
+      /UPDATE orders SET status = 'accepted'/.test(sql)
     );
     expect(orderUpdate).toBeDefined();
     expect(orderUpdate[1]).toEqual([1]);
@@ -354,7 +354,7 @@ describe('POST /api/payments/webhook', () => {
     expect(connection.commit).not.toHaveBeenCalled();
 
     const orderUpdate = connection.query.mock.calls.find(([sql]) =>
-      /UPDATE orders SET status = "accepted"/.test(sql)
+      /UPDATE orders SET status = 'accepted'/.test(sql)
     );
     expect(orderUpdate).toBeUndefined();
   });
@@ -386,7 +386,7 @@ describe('POST /api/payments/webhook', () => {
     expect(connection.rollback).not.toHaveBeenCalled();
 
     const orderUpdate = connection.query.mock.calls.find(([sql]) =>
-      /UPDATE orders SET status = "accepted"/.test(sql)
+      /UPDATE orders SET status = 'accepted'/.test(sql)
     );
     expect(orderUpdate).toBeUndefined();
   });

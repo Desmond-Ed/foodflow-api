@@ -52,7 +52,7 @@ async function createOrder({ customerId, vendorId, items }) {
     }
 
     const [orderResult] = await connection.query(
-      'INSERT INTO orders (customer_id, vendor_id, status, total_naira) VALUES (?, ?, "pending", ?)',
+      "INSERT INTO orders (customer_id, vendor_id, status, total_naira) VALUES (?, ?, 'pending', ?)",
       [customerId, vendorId, total]
     );
     const orderId = orderResult.insertId;
@@ -109,7 +109,7 @@ async function updateOrderStatus(orderId, newStatus) {
   // accept a cancelled order and require a manual refund.
   if (newStatus === 'cancelled') {
     const [[pendingPayment]] = await pool.query(
-      'SELECT id, created_at FROM payments WHERE order_id = ? AND status = "pending" ORDER BY id DESC LIMIT 1',
+      "SELECT id, created_at FROM payments WHERE order_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
       [orderId]
     );
     if (pendingPayment && !isPendingPaymentExpired(pendingPayment)) {
