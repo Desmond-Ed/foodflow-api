@@ -1,6 +1,6 @@
 const express = require('express');
 const { checkDbConnection } = require('../config/db');
-const { redisClient } = require('../config/redis');
+const { isRedisEnabled, redisClient } = require('../config/redis');
 
 const router = express.Router();
 
@@ -34,9 +34,14 @@ router.get('/ready', async (req, res) => {
     health.dependencies.mysql = 'down';
   }
 
-  const redisReady =
-    typeof redisClient.isReady === 'boolean' ? redisClient.isReady : redisClient.isOpen;
-  health.dependencies.redis = redisReady ? 'up' : 'down';
+  if (!isRedisEnabled()) {
+    health.dependencies.redis = 'disabled';
+  } else {
+    const redisReady =
+      Boolean(redisClient) &&
+      (typeof redisClient.isReady === 'boolean' ? redisClient.isReady : redisClient.isOpen);
+    health.dependencies.redis = redisReady ? 'up' : 'down';
+  }
 
   if (!mysqlUp) {
     health.status = 'degraded';

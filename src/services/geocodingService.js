@@ -1,5 +1,5 @@
 const { pool } = require('../config/db');
-const { redisClient } = require('../config/redis');
+const { cacheKey, isRedisEnabled, redisClient } = require('../config/redis');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -74,18 +74,18 @@ function normalizeAddress(rawAddress) {
 }
 
 async function getFromCache(normalizedAddress) {
-  const cacheKey = `geocode:${normalizedAddress}`;
+  const key = cacheKey(`geocode:${normalizedAddress}`);
 
   try {
-    if (redisClient.isReady) {
-      const cached = await redisClient.get(cacheKey);
+    if (isRedisEnabled() && redisClient && redisClient.isReady) {
+      const cached = await redisClient.get(key);
       if (cached) {
-        logger.info(`cache hit: ${cacheKey}`);
+        logger.info(`cache hit: ${key}`);
         return JSON.parse(cached);
       }
     }
   } catch (err) {
-    logger.error(`redis read failed for ${cacheKey}: ${err.message}`);
+    logger.error(`redis read failed for ${key}: ${err.message}`);
   }
 
   const [[row]] = await pool.query(
@@ -97,14 +97,14 @@ async function getFromCache(normalizedAddress) {
 }
 
 async function saveToCache(rawAddress, resolved) {
-  const cacheKey = `geocode:${resolved.normalized_address}`;
+  const key = cacheKey(`geocode:${resolved.normalized_address}`);
 
   try {
-    if (redisClient.isReady) {
-      await redisClient.setEx(cacheKey, GEOCODE_CACHE_TTL_SECONDS, JSON.stringify(resolved));
+    if (isRedisEnabled() && redisClient && redisClient.isReady) {
+      await redisClient.setEx(key, GEOCODE_CACHE_TTL_SECONDS, JSON.stringify(resolved));
     }
   } catch (err) {
-    logger.error(`redis write failed for ${cacheKey}: ${err.message}`);
+    logger.error(`redis write failed for ${key}: ${err.message}`);
   }
 
   try {

@@ -74,6 +74,14 @@ function createApp() {
   app.use('/api/delivery', requireApiKey, deliveryRoutes);
   app.use('/api/payments', paymentRoutes);
 
+  app.get('/', (req, res) => {
+    res.json({
+      name: 'FoodFlow API',
+      health: '/api/health',
+      vendors: '/api/vendors',
+    });
+  });
+
   app.use(notFoundHandler);
   app.use(errorHandler);
 

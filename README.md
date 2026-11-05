@@ -138,6 +138,10 @@ Key decisions:
 | POST   | `/api/payments/webhook`   | Paystack calls this to confirm payment          |
 | GET    | `/api/payments/:orderId/status` | Check an order's payment status            |
 
+> The numeric ids in these examples are placeholders. Use the `id` values
+> returned by `GET /api/vendors` and `POST /api/orders` instead of assuming
+> that a resource has id `1`.
+
 **Example — resolve a messy address:**
 
 ```bash
@@ -225,7 +229,8 @@ Copy `.env.example` to `.env` and fill in the placeholders. No real secrets belo
 | `DB_NAME` | `foodflow` | MySQL database name. |
 | `DB_SSL` | `false` | Set to `true` to require TLS for MySQL connections. |
 | `DB_SSL_CA` | `<ca-certificate>` | CA certificate for MySQL TLS; required when `DB_SSL=true`. |
-| `REDIS_URL` | `redis://<host>:<port>` | Redis connection URL. Use `rediss://` for TLS. |
+| `REDIS_URL` | `redis://<host>:<port>` | Optional Redis connection URL. Omit to run without caching. Use `rediss://` for TLS. |
+| `REDIS_KEY_PREFIX` | `foodflow:` | Prefix applied to every cache key, so a Redis instance can be shared safely. |
 | `REDIS_CONNECT_TIMEOUT_MS` | `2000` | Redis connection timeout in milliseconds. |
 | `REDIS_TLS_CA` | `<ca-certificate>` | CA certificate for Redis TLS when using `rediss://`. |
 | `TRUST_PROXY` | `false` | Trusted proxy hop count; set to `1` behind a single reverse proxy (e.g. Render). |
@@ -297,15 +302,22 @@ runs without any live database or external service.
 
 The repository includes a [Render](https://render.com) Blueprint
 (`render.yaml`) that provisions one free Node web service. It is designed to
-run against the free tiers of [Aiven](https://aiven.io) for MySQL and Valkey
-(Redis-compatible). Live URL: _add after deploying_.
+run against the free tiers of [Aiven](https://aiven.io) for MySQL and,
+optionally, Valkey (Redis-compatible). Live URL:
+https://foodflow-api-c1df.onrender.com
+
+MySQL is required. Redis/Valkey is an optional cache: leave `REDIS_URL` empty
+to run without it, or point it at any Redis-compatible instance. Every key is
+namespaced with `REDIS_KEY_PREFIX` (default `foodflow:`), so the cache can be
+shared with another application without key collisions.
 
 ### Provision the services
 
 1. Create an **Aiven for MySQL** free service. Copy its host, port, user,
    password, database name, and CA certificate.
-2. Create an **Aiven for Valkey** free service. Copy its connection URI. Use
-   the `rediss://` scheme and copy the CA certificate when TLS is enabled.
+2. Optionally create an **Aiven for Valkey** free service. Copy its connection
+   URI and use the `rediss://` scheme; copy the CA certificate when TLS is
+   enabled. If you skip this step, leave `REDIS_URL` empty.
 3. Push this repository to GitHub, then create a Render Blueprint from
    `render.yaml`. The Blueprint sets `NODE_VERSION=22`, `NODE_ENV=production`,
    `TRUST_PROXY=1`, `LOG_LEVEL=info`, and `DB_SSL=true`; it marks every secret
@@ -385,8 +397,10 @@ that swap only touches one file.
   light, demo-level traffic rather than sustained production use.
 - Cancelling an order that has already been paid does not issue a refund; the
   payment record and Paystack charge are left untouched.
-- Redis is optional at runtime. If it is unavailable the API still serves
-  requests but caching and geocoding rate limiting degrade.
+- Redis is optional at runtime. Caching is best-effort and never required for
+  correctness: if it is unavailable (or `REDIS_URL` is unset) the API serves
+  requests directly from MySQL, and geocoding falls back to its in-process
+  rate limit.
 
 ## What I'd add next
 

@@ -16,6 +16,5 @@ CREATE TABLE IF NOT EXISTS resolved_addresses (
 );
 
 -- Vendors need known coordinates to quote a delivery distance/fee against.
-ALTER TABLE vendors
-  ADD COLUMN latitude DECIMAL(10,7) NULL,
-  ADD COLUMN longitude DECIMAL(10,7) NULL;
+ALTER TABLE vendors ADD COLUMN latitude DECIMAL(10,7) NULL;
+ALTER TABLE vendors ADD COLUMN longitude DECIMAL(10,7) NULL;

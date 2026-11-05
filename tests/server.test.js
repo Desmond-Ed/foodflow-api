@@ -4,6 +4,7 @@ jest.mock('../src/config/db', () => ({ pool: { end: jest.fn() }, checkDbConnecti
 jest.mock('../src/config/redis', () => ({
   redisClient: { isReady: false, quit: jest.fn() },
   connectRedis: jest.fn(),
+  isRedisEnabled: jest.fn(() => true),
 }));
 jest.mock('../src/utils/logger', () => ({ info: jest.fn(), error: jest.fn() }));
 
@@ -66,6 +67,16 @@ describe('createShutdownHandler', () => {
     await shutdown('SIGINT');
 
     expect(deps.redisClient.quit).not.toHaveBeenCalled();
+    expect(deps.pool.end).toHaveBeenCalledTimes(1);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('does not touch Redis when it is disabled', async () => {
+    const deps = buildDeps({ redisClient: null });
+    const shutdown = createShutdownHandler(deps);
+
+    await shutdown('SIGTERM');
+
     expect(deps.pool.end).toHaveBeenCalledTimes(1);
     expect(deps.exit).toHaveBeenCalledWith(0);
   });

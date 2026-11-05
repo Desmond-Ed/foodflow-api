@@ -2,7 +2,7 @@ require('./setup');
 const request = require('supertest');
 const createApp = require('../src/app');
 const { checkDbConnection } = require('../src/config/db');
-const { redisClient } = require('../src/config/redis');
+const { isRedisEnabled, redisClient } = require('../src/config/redis');
 
 const app = createApp();
 
@@ -11,12 +11,14 @@ describe('GET /api/health (liveness)', () => {
     checkDbConnection.mockReset();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   afterEach(() => {
     checkDbConnection.mockReset();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   it('always returns ok without checking dependencies', async () => {
@@ -46,12 +48,14 @@ describe('GET /api/ready (readiness)', () => {
     checkDbConnection.mockReset();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   afterEach(() => {
     checkDbConnection.mockReset();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   it('reports ok when MySQL and Redis are both up', async () => {
@@ -68,10 +72,35 @@ describe('GET /api/ready (readiness)', () => {
     expect(typeof res.body.uptimeSeconds).toBe('number');
   });
 
+  it('reports ok when Redis is disabled and MySQL is up', async () => {
+    checkDbConnection.mockResolvedValue();
+    isRedisEnabled.mockReturnValue(false);
+
+    const res = await request(app).get('/api/ready');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.dependencies.mysql).toBe('up');
+    expect(res.body.dependencies.redis).toBe('disabled');
+  });
+
+  it('returns 503 when MySQL is down even if Redis is disabled', async () => {
+    checkDbConnection.mockRejectedValue(new Error('mysql unavailable'));
+    isRedisEnabled.mockReturnValue(false);
+
+    const res = await request(app).get('/api/ready');
+
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.dependencies.mysql).toBe('down');
+    expect(res.body.dependencies.redis).toBe('disabled');
+  });
+
   it('reports degraded but stays available when Redis is down', async () => {
     checkDbConnection.mockResolvedValue();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
 
     const res = await request(app).get('/api/ready');
 

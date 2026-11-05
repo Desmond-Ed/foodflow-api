@@ -1,5 +1,5 @@
 const { pool } = require('../config/db');
-const { redisClient } = require('../config/redis');
+const { cacheKey, isRedisEnabled, redisClient } = require('../config/redis');
 const logger = require('../utils/logger');
 
 const MENU_CACHE_TTL_SECONDS = 60;
@@ -12,21 +12,21 @@ async function getAllVendors() {
 }
 
 async function getVendorMenu(vendorId) {
-  const cacheKey = `vendor:${vendorId}:menu`;
+  const key = cacheKey(`vendor:${vendorId}:menu`);
 
   // Menus don't change often, so we serve them from Redis first and only
   // fall back to MySQL on a cache miss. This is the kind of read-heavy
   // endpoint caching helps most with at scale.
   try {
-    if (redisClient.isReady) {
-      const cached = await redisClient.get(cacheKey);
+    if (isRedisEnabled() && redisClient && redisClient.isReady) {
+      const cached = await redisClient.get(key);
       if (cached) {
-        logger.info(`cache hit: ${cacheKey}`);
+        logger.info(`cache hit: ${key}`);
         return JSON.parse(cached);
       }
     }
   } catch (err) {
-    logger.error(`redis read failed for ${cacheKey}: ${err.message}`);
+    logger.error(`redis read failed for ${key}: ${err.message}`);
   }
 
   const [rows] = await pool.query(
@@ -35,20 +35,20 @@ async function getVendorMenu(vendorId) {
   );
 
   try {
-    if (redisClient.isReady) {
-      await redisClient.setEx(cacheKey, MENU_CACHE_TTL_SECONDS, JSON.stringify(rows));
+    if (isRedisEnabled() && redisClient && redisClient.isReady) {
+      await redisClient.setEx(key, MENU_CACHE_TTL_SECONDS, JSON.stringify(rows));
     }
   } catch (err) {
-    logger.error(`redis write failed for ${cacheKey}: ${err.message}`);
+    logger.error(`redis write failed for ${key}: ${err.message}`);
   }
 
   return rows;
 }
 
 async function invalidateMenuCache(vendorId) {
-  const cacheKey = `vendor:${vendorId}:menu`;
-  if (redisClient.isReady) {
-    await redisClient.del(cacheKey);
+  const key = cacheKey(`vendor:${vendorId}:menu`);
+  if (isRedisEnabled() && redisClient && redisClient.isReady) {
+    await redisClient.del(key);
   }
 }
 
