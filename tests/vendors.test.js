@@ -2,7 +2,7 @@ require('./setup');
 const request = require('supertest');
 const createApp = require('../src/app');
 const { pool } = require('../src/config/db');
-const { redisClient } = require('../src/config/redis');
+const { isRedisEnabled, redisClient } = require('../src/config/redis');
 
 const app = createApp();
 
@@ -30,6 +30,7 @@ describe('GET /api/vendors/:id/menu', () => {
     jest.clearAllMocks();
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   it('returns the menu for a valid vendor id', async () => {
@@ -41,6 +42,36 @@ describe('GET /api/vendors/:id/menu', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data[0].name).toBe('Jollof Rice + Chicken');
+  });
+
+  it('reads the menu from Redis using the prefixed key', async () => {
+    redisClient.isReady = true;
+    redisClient.get.mockResolvedValueOnce(
+      JSON.stringify([
+        { id: 1, name: 'Jollof Rice + Chicken', price_naira: '3500.00', is_available: 1 },
+      ])
+    );
+
+    const res = await request(app).get('/api/vendors/1/menu');
+
+    expect(res.status).toBe(200);
+    expect(redisClient.get).toHaveBeenCalledWith('foodflow:vendor:1:menu');
+  });
+
+  it('skips Redis and uses MySQL when Redis is disabled', async () => {
+    isRedisEnabled.mockReturnValue(false);
+    redisClient.isOpen = true;
+    redisClient.isReady = true;
+    pool.query.mockResolvedValueOnce([
+      [{ id: 1, name: 'Jollof Rice + Chicken', price_naira: '3500.00', is_available: 1 }],
+    ]);
+
+    const res = await request(app).get('/api/vendors/1/menu');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].name).toBe('Jollof Rice + Chicken');
+    expect(redisClient.get).not.toHaveBeenCalled();
+    expect(redisClient.setEx).not.toHaveBeenCalled();
   });
 
   it('falls back to MySQL when Redis is open but not ready', async () => {

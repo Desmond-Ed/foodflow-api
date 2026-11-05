@@ -6,7 +6,7 @@ process.env.NOMINATIM_MIN_INTERVAL_MS = '0';
 process.env.NOMINATIM_USER_AGENT = 'foodflow-api-tests (test@example.com)';
 
 const { pool } = require('../src/config/db');
-const { redisClient } = require('../src/config/redis');
+const { isRedisEnabled, redisClient } = require('../src/config/redis');
 const { resolveAddress, normalizeAddress } = require('../src/services/geocodingService');
 
 describe('normalizeAddress', () => {
@@ -36,6 +36,7 @@ describe('resolveAddress', () => {
     global.fetch = originalFetch;
     redisClient.isOpen = false;
     redisClient.isReady = false;
+    isRedisEnabled.mockReturnValue(true);
   });
 
   it('rejects a missing rawAddress with a 400', async () => {
@@ -59,6 +60,9 @@ describe('resolveAddress', () => {
     expect(result.source).toBe('cache');
     expect(result.latitude).toBeCloseTo(6.6018);
     expect(global.fetch).not.toHaveBeenCalled();
+    expect(redisClient.get).toHaveBeenCalledWith(
+      'foodflow:geocode:12 Allen Avenue, Lagos, Nigeria'
+    );
 
     redisClient.isReady = false;
   });
@@ -105,6 +109,29 @@ describe('resolveAddress', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('skips Redis and uses MySQL when Redis is disabled', async () => {
+    isRedisEnabled.mockReturnValue(false);
+    redisClient.isOpen = true;
+    redisClient.isReady = true;
+    pool.query.mockResolvedValueOnce([
+      [
+        {
+          normalized_address: '12 Allen Avenue, Lagos, Nigeria',
+          latitude: '6.6018000',
+          longitude: '3.3490000',
+          confidence: 'high',
+        },
+      ],
+    ]);
+    global.fetch = jest.fn();
+
+    const result = await resolveAddress('12 Allen Avenue');
+
+    expect(result.source).toBe('cache');
+    expect(redisClient.get).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('geocodes via Nominatim on a full cache miss and caches the result', async () => {
     redisClient.isReady = true;
     redisClient.get.mockResolvedValueOnce(null);
@@ -121,7 +148,11 @@ describe('resolveAddress', () => {
     expect(result.source).toBe('nominatim');
     expect(result.confidence).toBe('high');
     expect(result.latitude).toBeCloseTo(6.6018);
-    expect(redisClient.setEx).toHaveBeenCalled();
+    expect(redisClient.setEx).toHaveBeenCalledWith(
+      'foodflow:geocode:Some New Unseen Street, Lagos, Nigeria',
+      expect.any(Number),
+      expect.any(String)
+    );
 
     const [[url, options]] = global.fetch.mock.calls;
     expect(url).toContain('nominatim.openstreetmap.org');

@@ -22,4 +22,6 @@ jest.mock('../src/config/redis', () => ({
     on: jest.fn(),
   },
   connectRedis: jest.fn(),
+  cacheKey: jest.fn((name) => `foodflow:${name}`),
+  isRedisEnabled: jest.fn(() => true),
 }));

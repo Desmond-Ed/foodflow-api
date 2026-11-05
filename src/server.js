@@ -1,6 +1,6 @@
 require('dotenv').config();
 const createApp = require('./app');
-const { connectRedis, redisClient } = require('./config/redis');
+const { connectRedis, isRedisEnabled, redisClient } = require('./config/redis');
 const { pool } = require('./config/db');
 const logger = require('./utils/logger');
 
@@ -43,7 +43,7 @@ function createShutdownHandler({
 
       server.close(async (err) => {
         try {
-          if (redisClient.isReady) {
+          if (redisClient && redisClient.isReady) {
             await redisClient.quit();
           }
           await pool.end();
@@ -84,6 +84,11 @@ async function start() {
   process.on('unhandledRejection', (reason) => {
     logger.error(`unhandled rejection: ${reason instanceof Error ? reason.message : reason}`);
   });
+
+  if (!isRedisEnabled()) {
+    logger.info('Redis disabled (REDIS_URL not set)');
+    return;
+  }
 
   try {
     // Redis is an optional performance layer, so connect after the HTTP

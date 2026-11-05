@@ -5,10 +5,13 @@ INSERT INTO vendors (name, city) VALUES
   ('Mama Nkechi Kitchen', 'Lagos'),
   ('Chicken Republic - Ikeja', 'Lagos');
 
-INSERT INTO menu_items (vendor_id, name, price_naira) VALUES
-  (1, 'Jollof Rice + Chicken', 3500.00),
-  (1, 'Egusi Soup + Pounded Yam', 4000.00),
-  (2, 'Spicy Chicken Meal', 3200.00);
+-- Resolve vendor ids by name so the seed does not assume AUTO_INCREMENT values.
+INSERT INTO menu_items (vendor_id, name, price_naira)
+SELECT id, 'Jollof Rice + Chicken', 3500.00 FROM vendors WHERE name = 'Mama Nkechi Kitchen'
+UNION ALL
+SELECT id, 'Egusi Soup + Pounded Yam', 4000.00 FROM vendors WHERE name = 'Mama Nkechi Kitchen'
+UNION ALL
+SELECT id, 'Spicy Chicken Meal', 3200.00 FROM vendors WHERE name = 'Chicken Republic - Ikeja';
 
 INSERT INTO riders (name, phone) VALUES ('Tunde Bello', '08012345678');
 
